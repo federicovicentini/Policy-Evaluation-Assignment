@@ -1,0 +1,721 @@
+---
+title: "Assignment"
+output: pdf_document
+---
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = FALSE)
+options(digits=5)
+library(xts)
+library(zoo)
+library(MultipleBubbles)
+library(aTSA)
+library(urca)
+library(flexmix)
+library(forecast)
+library(vars)
+library(svars)
+library(ggplot2)
+library(knitr)
+library(erer)
+library(reshape2)
+#function
+adf_test <- function(timeseries) { # nolint
+
+    out <- matrix(NA, nrow = 0, ncol = 7)
+
+    out_colnames <- c("N of lags", "Type", "lag", "ADF",
+     "p.value", "Stationary at 5%", "Stationary at 10%")
+
+    colnames(out) <- out_colnames
+
+    for (count in 1:12) {
+        i   <-  adf.test(timeseries, nlag = count, output = FALSE)
+        #i   <-  ur.df2( timeseries, type ="none", lags = 12, 
+        #                selectlags = "BIC", digit = 2)
+
+        for (count2 in 1:3) {
+
+           for (count3 in 1:count) {
+            if (count2 == 1) {
+               rw <- c(count, count2, count3,
+                i$type1[count3, 2], i$type1[count3, 3], NA, NA)
+
+            } else if (count2 == 2) {
+               rw <- c(count, count2, count3,
+                i$type2[count3, 2], i$type2[count3, 3], NA, NA)
+
+            } else {
+                rw <- c(count, count2, count3,
+                i$type3[count3, 2], i$type3[count3, 3], NA, NA)
+
+            }
+            names(rw) <- out_colnames
+            rw[1] <- as.integer(rw[1])
+            rw[2] <- as.integer(rw[2])
+            rw[3] <- as.integer(rw[3])
+            rw["ADF"] <- round(rw["ADF"], digits = 4)
+            rw["p.value"] <- round(rw["p.value"], digits = 4)
+            if (rw["p.value"] >= .05) {
+                rw[6] <- "No Stat."
+                } else {
+                rw[6] <- "Stat"
+                }
+
+            if (rw["p.value"] >= .1) {
+                rw[7] <- "No Stat."
+                } else {
+                rw[7] <- "Stat"
+                }
+            if (rw["Type"] == 1) {
+                rw["Type"] <- "no drift no trend"
+            } else if (rw["Type"] == 2) {
+                rw["Type"] <- "with drift no trend"
+            } else {
+                rw["Type"] <- "with drift and trend"
+            }
+            out <- rbind(out, rw)
+           }
+        }
+
+    }
+
+return(out)
+
+}
+time_series_plot <- function(timeseries) {
+    out1 <- plot(timeseries)
+    out2 <- acf(timeseries)
+    out3 <- pacf(timeseries)
+    #Stationarity
+    out4 <- ur.df2(timeseries, type = "drift",
+    lags = 12, selectlags = "BIC", digit = 2)
+    out5 <- ur.df2(timeseries, type = "trend",
+    lags = 12, selectlags = "BIC", digit = 2)
+    out6 <- ur.df2(timeseries, type = "none",
+    lags = 12, selectlags = "BIC", digit = 2)
+    out7 <- adf_test(timeseries)  
+    out <- list(out1, out2, out3, out4, out5, out6, out7)
+    return(out)
+}
+
+arroots <- function(object){
+  if(!("Arima" %in% class(object)) &
+     !("ar" %in% class(object)))
+    stop("object must be of class Arima or ar")
+  if("Arima" %in% class(object))
+    parvec <- object$model$phi
+  else
+    parvec <- object$ar
+  if(length(parvec) > 0)
+  {
+    last.nonzero <- max(which(abs(parvec) > 1e-08))
+    if (last.nonzero > 0)
+      return(structure(list(
+          roots=polyroot(c(1,-parvec[1:last.nonzero])),
+          type="AR"),
+        class='armaroots'))
+  }
+  return(structure(list(roots=numeric(0), type="AR"),
+    class='armaroots'))
+}
+
+# Compute MA roots
+maroots <- function(object)
+{
+  if(!("Arima" %in% class(object)))
+    stop("object must be of class Arima")
+  parvec <- object$model$theta
+  if(length(parvec) > 0)
+  {
+    last.nonzero <- max(which(abs(parvec) > 1e-08))
+    if (last.nonzero > 0)
+      return(structure(list(
+          roots=polyroot(c(1,parvec[1:last.nonzero])),
+          type="MA"),
+        class='armaroots'))
+  }
+  return(structure(list(roots=numeric(0), type="MA"),
+    class='armaroots'))
+}
+
+plot.armaroots <- function(x, xlab="Real", ylab="Imaginary",
+    main=paste("Inverse roots of", x$type,
+          "characteristic polynomial"),
+    ...){
+  oldpar <- par(pty='s')
+  on.exit(par(oldpar))
+  plot(c(-1,1), c(-1,1), xlab=xlab, ylab=ylab,
+       type="n", bty="n", xaxt="n", yaxt="n", main=main, ...)
+  axis(1, at=c(-1,0,1), line=0.5, tck=-0.025)
+  axis(2, at=c(-1,0,1), label=c("-i","0","i"),
+    line=0.5, tck=-0.025)
+  circx <- seq(-1,1,l=501)
+  circy <- sqrt(1-circx^2)
+  lines(c(circx,circx), c(circy,-circy), col='gray')
+  lines(c(-2,2), c(0,0), col='gray')
+  lines(c(0,0), c(-2,2), col='gray')
+  if(length(x$roots) > 0)
+  {
+    inside <- abs(x$roots) > 1
+    points(1/x$roots[inside], pch=19, col='black')
+    if(sum(!inside) > 0)
+      points(1/x$roots[!inside], pch=19, col='red')
+  }
+}
+
+#import dataset
+
+oil     <- read.csv(file = "oil_data_1.csv")
+
+#convert to xts
+from    <- as.Date("1973-02-01")
+to      <- as.Date("2007-12-01")
+
+
+
+
+```
+
+# Point 1
+
+The plot below represents three monthly time series, in the order:
+\begin{enumerate}
+  \item $\Delta\,prod:\;\; \% $ change in global crude oil production (seen in blue)
+  \item $rpo_{t}$: the real price of oil (seen in red)
+  \item $rea_{t}:$ index of the real economic activity (seen in green)
+\end{enumerate}
+from 1973:1 to 2007:12.
+
+```{r point1, echo=FALSE}
+#generate xts
+yq      <- seq(from, to, by = "month") 
+
+oil     <- xts(oil, order.by = yq)
+l_yq    <- length(yq)
+
+plot(oil, col = c("#0077ff", "#ff00a2", "#48ff00"))
+legend(x="bottomright", legend = c("prod", "rea", "price"),
+       col = c("#0077ff", "#ff00a2", "#48ff00"),
+       lty = 1:1, cex = 1)
+#I(1)
+
+```
+From the acf we can clearly see the presence of an autocorrelation process. 
+From the partial autocorrelation function we can infer that it's probably first-order autocorrelation
+since the only significant column is the first one (also the second one, but it has a negative sign).
+
+\newpage
+
+In order to test if the $rea_{t}$ is an $I(1)$, we will use an ADF test with a minimun lag = 1. We will perform the test using four different specifications of the process:
+\begin{enumerate}
+  \item No constant, no trend
+  \item Constant
+  \item Constant with trend
+\end{enumerate}
+
+
+First, we print the $rea_{t}$ time series graph.
+Then, we perform the different types of the test with a maximum lag order of 12: 
+$$  rea_t = \alpha + \delta_1  rea_{t-1} + ... + \delta_12 rea_{t-12}$$
+The criteria for selection of the lag order is selecting the one which has lower BIC:
+
+```{r reagrapgh, echo=FALSE}
+timeseries <- ts(oil$rea)
+out <- time_series_plot(timeseries)
+
+
+
+print("Without constant and without time trend")
+ad <- out[[6]]
+ad
+print("Max lag : 12")
+print(paste("Lag used:", ad$lag.used ))
+print(paste("BIC:", ad$bic))
+
+print("With constant and without time trend")
+ad <- out[[4]]
+ad
+print("Max lag : 12")
+print(paste("Lag used:", ad$lag.used ))
+print(paste("BIC:", ad$bic))
+print("With constant and with time trend")
+ad <- out[[5]]
+ad
+print("Max lag : 12")
+print(paste("Lag used:", ad$lag.used ))
+print(paste("BIC:", ad$bic))
+#plot(out[[5]])
+
+
+```
+
+The results of the ADF tests shows that the process is stationary with the simplest specification (without constant
+and time trend), up to the third significance level (over 1$\%$). However, the other possible specification, which add a constant and then also a time trend
+present higher p-values (also, it's got the lowest BIC), thus the specification we are going to select is the first one.
+This proves that the process is $I(1)$, since the first specification includes only one lag (without any constant and time trend).
+This is consistent with what we should expect, since $rea_{t}$ is computed as a percentage deviation from the mean (it's basically an indicator of the business cycle).
+
+Thus, the specification we select in the end is:
+$$ \delta rea_t =  \delta_1 rea_{t-1} + ... +  \delta_12 rea_{t-12}$$
+
+
+# Point 2
+
+We take the first difference of the time series $rea$ and check if it is stationary with
+an adf test. Before that we print the time series of the first differences, its acf and pacf
+to understand the correct specification for the ADF test.
+
+```{r reagrapgh1, echo=FALSE}
+#first diff
+
+timeseries     <-   diff(oil$rea)
+timeseries     <-  timeseries[-1]
+timeseries     <-  xts(timeseries, order.by = yq[-1])
+
+out <- time_series_plot(timeseries)
+
+plot(out[[3]])
+plot(out[[1]])
+plot(out[[2]])
+
+
+```
+
+The graphs above indicate the stationarity of the process. 
+Indeed the acf, when the $lag>2$ shows an autcorrelation
+that is not statisticaly different from 0 (except for a few peaks). As for the partial autocorrelation, it is statistically different only for some lags>10 (except, of course, for lag = 1).
+From the plot of the time series we can see a mean reverting process, and so I will opt for the specifications without constant and time trend, because it is less restrictive.
+So the test will have the following specifications:
+$$ \Delta rea_t = \delta_1 \Delta reat_{t-1} + ... + \delta_12 \Delta reat_{t-12}$$
+$$ \Delta rea_t = \alpha + \delta_1 \Delta reat_{t-1} + ... + \delta_12 \Delta reat_{t-12}$$
+$$ \Delta rea_t = \alpha + \beta * t + \delta_1 \Delta reat_{t-1} + ... + \delta_12 \Delta reat_{t-12}  $$
+
+The test will be performed with all possible three specification, and the specification
+with lower adf will be selected.
+
+```{r point2, echo= FALSE}
+
+#Point2
+#analysis ts
+
+print("Without constant and without time trend")
+ad <- out[[6]]
+ad
+print("Max lag : 12")
+print(paste("Lag used:", ad$lag.used ))
+print(paste("BIC:", ad$bic))
+
+print("With constant and without time trend")
+ad <- out[[4]]
+ad
+print("Max lag : 12")
+print(paste("Lag used:", ad$lag.used ))
+print(paste("BIC:", ad$bic))
+print("With constant and with time trend")
+ad <- out[[5]]
+ad
+print("Max lag : 12")
+print(paste("Lag used:", ad$lag.used ))
+print(paste("BIC:", ad$bic))
+```
+
+The test above shows another time the stationarity of the process, since with all specifications we reject the null
+hypothesis of non-stationarity up and beyond the 1\% significance level. 
+Furthermore, we select the simplest specification yet another time, since even if more complex specifications yield
+lower values of the p-value, the BIC increases, and with the first specification we already have a p-value that is asyntotically equal to zero.
+Regarding the order of integration, we can say that the process is an $I(0)$, since we produced this time series by first-differencing 
+an $I(1)$ process, and we defined the order of integration as the number of differencing needed to achieve a stationary process.
+
+# Point 3
+
+We select the best ARMA model setting the hyper-paramenters (p,q), using the BIC criteria, through the "best_arima" and the "bic_score" functions
+reported below
+
+```{r point3, echo = TRUE, include = TRUE}
+
+# Function calculating the BIC score
+
+bic_score <- function(k, n, l) {
+    x <-  2 * k * log(n) - 2 * l
+    return(x)
+}
+
+# Best arima model selected with the BIC criterion
+bestarima <- function(timeseries, maxlag) {
+    plag    <- 1:maxlag
+    qlag    <- 1:maxlag
+
+    model1   <- matrix(NA, nrow = 0, ncol = 3)
+    colnames(model1) <- c("p", "q", "BIC")
+    for (p in plag) {
+       for (q in qlag) {
+        out <- tryCatch(
+        {
+            # Just to highlight: if you want to use more than one 
+            # R expression in the "try" part then you'll have to 
+            # use curly brackets.
+            # 'tryCatch()' will return the last evaluated expression 
+            # in case the "try" part was completed successfully
+
+            arima(timeseries, order = c(p, 0, q))
+            # The return value of `readLines()` is the actual value 
+            # that will be returned in case there is no condition 
+            # (e.g. warning or error). 
+            # You don't need to state the return value via `return()` as code 
+            # in the "try" part is not wrapped inside a function (unlike that
+            # for the condition handlers for warnings and error below)
+        },
+        error=function(cond) {
+            # Choose a return value in case of error
+            return(NA)
+        },
+        warning=function(cond) {
+            # Choose a return value in case of warning
+            return(NA)
+        }
+    )    
+    if(any(!is.na(out))){
+        x <- arima(timeseries, order = c(p, 0, q))
+        x_bic <- bic_score(length(x$coef), x$nobs, x$loglik)
+        
+
+        
+       } else {
+          x_bic <- 9999
+       }
+       model1 <- rbind(model1, c(p, q, x_bic))
+    }
+    }
+    p <- model1[which.min(model1[, "BIC"]), "p"]
+    q <- model1[which.min(model1[, "BIC"]), "q"]
+    out <- arima(timeseries, order = c(p, 0, q))
+    acf(out$residuals)
+   return(c(p, 0, q))
+}
+```
+
+```{r pointz, echo=FALSE, include=TRUE}
+best_arima <- bestarima(timeseries, 4)
+
+arma <- arima(timeseries, order = best_arima, method = "ML")
+print(paste("BIC:", bic_score(length(arma$coef), arma$nobs, arma$loglik)))
+summary(arma)
+plot(arma)
+plot(acf(arma$residuals))
+plot(pacf(arma$residuals))
+
+```
+
+The autocorrelation function of the residuals is not statistically different from 0, and it looks like white noise.
+The arma model adopted is one the fits the time series in the best possible way, so:
+$$ y_t = \theta_1 y_{t-1} + \theta_2 y_{t-2} + \theta_3 y_{t-3} + \beta_1 \epsilon_{t-1} + \beta_2 \epsilon_{t-2} + \epsilon_{t}$$
+The issue regarding this model is an overfitting one, since all the point in the timeseries has been used to fit the model, as opposite to 
+the usual practice. But the aim of this model is not to provide a prediction for the series, but instead the understading of the process in
+the specific time span of the series.
+
+We can also see from the inverse root plots of the AR and MA that the process is stationary (all the inverse roots lie
+within the unit circle).
+
+# Point 4
+
+```{r point4, echo = FALSE}
+# table with just R output
+# Test stationarity 
+adf.test(oil$Dprod)
+adf.test(oil$rea)
+adf.test(oil$rpo)
+
+
+#bic_score(length(arma$coef), arma$nobs, arma$loglik))
+
+# estimation
+var_model_lev <- VAR(oil, lag = 3, type = "const", ic= "HQ")
+res           <- residuals(var_model_lev)
+par(mfrow = c(1, 1))
+acf(res[, 1])
+acf(res[, 2])
+acf(res[, 3])
+
+par(mfrow = c(1, 1))
+pacf(res[, 1])
+pacf(res[, 2])
+pacf(res[, 3])
+
+# Calculate summary statistics
+model_summary <- summary(var_model_lev)
+model_summary
+# Obtain variance-covariance matrix
+model_summary$covres
+model_summary$corres
+
+invroots <- roots(var_model_lev, modulus=FALSE)  #no stationary
+
+par(mfrow=c(1,1))
+root.comp <- Im(invroots)
+root.real <- Re(invroots)
+x <- seq(-1, 1, length=1000)
+y1 <- sqrt(1-x^2)
+y2 <- -sqrt(1-x^2)
+plot(c(x, x), c(y1, y2), xlab='Real part', ylab='Imaginary part', type='l', main='Unit Circle', ylim=c(-2, 2), xlim=c (-2, 2))
+abline(h=0)
+abline(v=0)
+points(root.comp, root.real, pch=19)
+legend(-1.5, -1.5, legend= "Eigenvalues", pch=19)
+
+```
+Following the BIC criterion, we selected 2 lags for our VAR model. 
+
+As you can see from the inverse roots plot, all inverse roots lie
+within the unit circle, thus we can confidently say that the process is stationary. 
+
+Same conclusions can be drawn by analyzing the plots of the residuals that you can see reported above.
+
+## Point 5
+
+We report below the mapping from the text of the assignment:
+
+$$ \left[\begin{matrix}
+e_{t}^{\Delta\,prod}  \\
+e_{t}^{rea}  \\
+e_{t}^{rpo} 
+\end{matrix}\right]
+=
+\left[\begin{matrix}
+c_{11} & c_{12} & c_{13} \\
+c_{21} & c_{22} & c_{32} \\
+c_{31} & c_{32} & c_{33} 
+\end{matrix}\right]  
+\left[\begin{matrix}
+u_{t}^{oil\;supply\;shock}  \\
+u_{t}^{agg\;demand\;shock}  \\
+u_{t}^{oil\;specific\;demand\;shock} 
+\end{matrix}\right]
+$$
+
+Based on the assumptions made in the text, we set $c_{12}$, $c_{13}$, and $c_{23}$ equal to zero. This is consistent
+with the fact that we need to have a lower triangular matrix $C$, since in a Cholesky decomposition we need this 
+restriction in order to get a unique solution.
+
+
+# Point 6
+
+```{r point65555, echo = FALSE}
+# oir <- irf(var_model_lev, impulse = colnames(oil),
+#              response = colnames(oil), n.ahead = 25,
+#               ortho = TRUE, runs = 1000, seed = 12345
+# )
+# plot(oir)
+
+
+
+# oir <- irf(var_model_lev, impulse = colnames(oil),
+#             response = colnames(oil)[1], n.ahead = 25,
+#              ortho = TRUE, runs = 2500, seed = 12345
+# )
+# plot(oir)
+oir <- irf(var_model_lev, impulse = colnames(oil)[1],
+            response = colnames(oil)[2], n.ahead = 25,
+             ortho = TRUE, runs = 1000, seed = 12345
+)
+plot(oir)
+oir <- irf(var_model_lev, impulse = colnames(oil)[2],
+            response = colnames(oil)[2], n.ahead = 25,
+             ortho = TRUE, runs = 1000, seed = 12345
+)
+plot(oir)
+oir <- irf(var_model_lev, impulse = colnames(oil)[3],
+            response = colnames(oil)[2], n.ahead = 25,
+             ortho = TRUE, runs = 1000, seed = 12345
+)
+plot(oir)
+oir <- irf(var_model_lev, impulse = colnames(oil)[1],
+            response = colnames(oil)[3], n.ahead = 25,
+             ortho = TRUE, runs = 1000, seed = 12345
+)
+plot(oir)
+oir <- irf(var_model_lev, impulse = colnames(oil)[2],
+            response = colnames(oil)[3], n.ahead = 25,
+             ortho = TRUE, runs = 1000, seed = 12345
+)
+plot(oir)
+oir <- irf(var_model_lev, impulse = colnames(oil)[3],
+            response = colnames(oil)[3], n.ahead = 25,
+             ortho = TRUE, runs = 1000, seed = 12345
+)
+plot(oir)
+```
+
+We can see from the impulse response function of $rea$ that:
+\begin{itemize}
+  \item a negative shock to oil supply leads to an initial increase in real economic activity (delayed
+  by 2 or 3 periods) which then is reabsorbed pretty rapidly. Note that if you look at the confidence bands
+  for the 95\% confidence level, the response of $rea$ to a negative oil supply shock is always non-distinguishable
+  from zero. (NOTE: the graph is mirrored with respect to what we reported above)
+  \item a positive shock to aggregate demand leads to an initial increas in real economic activity (immediate) that peaks after 4 periods and
+  then decreases in the long run, being almost insignificant after 24 periods (2 years)
+  \item a positive shock to oil market specific demand leads to a gradual increase in real economic activity that
+  peaks after 5 periods, and then goes to zero in the long run (note that after 5 periods is already insignificant).
+  Note that probably the relationship is inverted here: it seems more realistic that an increase in real economic activity
+  leads to an increse in oil-market specific demand than the other way around.
+\end{itemize}
+We can see from the impulse response function of $rpo$ that:
+\begin{itemize}
+  \item a negative shock to oil supply leads to an increase in the real price of oil, which anyway is not significant
+  at the 95\% confidence level, and anyway is completely gone after a few periods even if you use lower significance levels.
+  (NOTE: the graph is mirrored with respect to what we reported above)
+  \item a positive shock to aggregate demand leads to a positive and persistent change in the real price of oil.
+  Even in  the long run, we are not witnessing a return to the pre-shock levels of $rpo$. This is consistent with the idea 
+  that the business cycle shock leads to long-run effects in the price level (since, as we know, inflation is persistent, 
+  and rarely negative shocks deflate prices).
+  \item a positive shock to oil market specific demand leads to (as we should expect) a significant increase in $rpo$, which
+  peaks after 4 periods and then decreases in the long run, being almost insignificant after 24 periods (2 years).
+\end{itemize}
+
+
+
+# Point 7
+
+```{r point7, echo = FALSE, include=TRUE, out.height="150%"}
+VARhd <- function(Estimation){
+
+  ## make X and Y
+  nlag    <- Estimation$p   # number of lags
+  DATA    <- Estimation$y   # data
+  QQ      <- VARmakexy(DATA,nlag,1)
+
+
+  ## Retrieve and initialize variables 
+  invA    <- t(chol(as.matrix(summary(Estimation)$covres)))   # inverse of the A matrix
+  Fcomp   <- companionmatrix(Estimation)                      # Companion matrix
+
+  #det     <- c_case                                           # constant and/or trends
+  F1      <- t(QQ$Ft)                                         # make comparable to notes
+  eps     <- ginv(invA) %*% t(residuals(Estimation))          # structural errors 
+  nvar    <- Estimation$K                                     # number of endogenous variables
+  nvarXeq <- nvar * nlag                                      # number of lagged endogenous per equation
+  nvar_ex <- 0                                                # number of exogenous (excluding constant and trend)
+  Y       <- QQ$Y                                             # left-hand side
+  #X       <- QQ$X[,(1+det):(nvarXeq+det)]                    # right-hand side (no exogenous)
+  nobs    <- nrow(Y)                                          # number of observations
+
+
+  ## Compute historical decompositions
+
+  # Contribution of each shock
+  invA_big <- matrix(0,nvarXeq,nvar)
+  invA_big[1:nvar,] <- invA
+  Icomp <- cbind(diag(nvar), matrix(0,nvar,(nlag-1)*nvar))
+  HDshock_big <- array(0, dim=c(nlag*nvar,nobs+1,nvar))
+  HDshock <- array(0, dim=c(nvar,(nobs+1),nvar))
+
+  for (j in 1:nvar){  # for each variable
+    eps_big <- matrix(0,nvar,(nobs+1)) # matrix of shocks conformable with companion
+    eps_big[j,2:ncol(eps_big)] <- eps[j,]
+    for (i in 2:(nobs+1)){
+      HDshock_big[,i,j] <- invA_big %*% eps_big[,i] + Fcomp %*% HDshock_big[,(i-1),j]
+      HDshock[,i,j] <-  Icomp %*% HDshock_big[,i,j]
+    } 
+
+  } 
+
+  HD.shock <- array(0, dim=c((nobs+nlag),nvar,nvar))   # [nobs x shock x var]
+
+  for (i in 1:nvar){
+
+    for (j in 1:nvar){
+      HD.shock[,j,i] <- c(rep(NA,nlag), HDshock[i,(2:dim(HDshock)[2]),j])
+    }
+  }
+
+  return(HD.shock)
+
+}
+VARmakexy <- function(DATA,lags,c_case){
+
+  nobs <- nrow(DATA)
+
+  #Y matrix 
+  Y <- DATA[(lags+1):nrow(DATA),]
+  Y <- DATA[-c(1:lags),]
+
+  #X-matrix 
+  if (c_case==0){
+    X <- NA
+      for (jj in 0:(lags-1)){
+        X <- rbind(DATA[(jj+1):(nobs-lags+jj),])
+      } 
+    } else if(c_case==1){ #constant
+      X <- NA
+      for (jj in 0:(lags-1)){
+        X <- rbind(DATA[(jj+1):(nobs-lags+jj),])
+      }
+      X <- cbind(matrix(1,(nobs-lags),1), X) 
+    } else if(c_case==2){ # time trend and constant
+      X <- NA
+      for (jj in 0:(lags-1)){
+        X <- rbind(DATA[(jj+1):(nobs-lags+jj),])
+      }
+      trend <- c(1:nrow(X))
+      X <-cbind(matrix(1,(nobs-lags),1), t(trend))
+    }
+  A <- (t(X) %*% as.matrix(X)) 
+  B <- (as.matrix(t(X)) %*% as.matrix(Y))
+
+  Ft <- ginv(A) %*% B
+
+  retu <- list(X=X,Y=Y, Ft=Ft)
+  return(retu)
+}
+
+companionmatrix <- function (x) 
+{
+  if (!(class(x) == "varest")) {
+    stop("\nPlease provide an object of class 'varest', generated by 'VAR()'.\n")
+  }
+  K <- x$K
+  p <- x$p
+  A <- unlist(Acoef(x))
+  companion <- matrix(0, nrow = K * p, ncol = K * p)
+  companion[1:K, 1:(K * p)] <- A
+  if (p > 1) {
+    j <- 0
+    for (i in (K + 1):(K * p)) {
+      j <- j + 1
+      companion[i, j] <- 1
+    }
+  }
+  return(companion)
+}
+# Compute historical decomposition
+
+HD <- VARhd(Estimation = var_model_lev)
+
+
+ex <- HD[,,2]
+ex1 <- as.data.frame(ex) # transforming the HD matrix as data frame #
+ex2 <- ex1[3:419, 1:3] # taking our the first 2 rows as they are N/As #
+colnames(ex2) <- c("Oil Supply shock", 
+"Oil-market specific shock", "Aggregate Demand shock") # renaming columns #
+ex2$Period <- 1:nrow(ex2) # creating an id column #
+col_id <- grep("Period", names(ex2)) # setting the new variable as id #
+ex3 <- ex2[, c(col_id,
+ (1:ncol(ex2))[-col_id])] # moving id variable to the first column #
+molten.ex <- melt(ex3, id = "Period") # melting the data frame #
+
+ggplot(molten.ex, aes(x = Period, y = value, fill = variable)) + 
+geom_bar(stat = "identity") + 
+guides(fill = guide_legend(title= "Legend", reverse = TRUE)) +
+theme(legend.position="bottom") #+
+#geom_line(aes(y = rpo, x=Period), color = "red", linetype = "dotted")
+```
+
+We can see from this graph that the real price of oil ($rpo$) is 
+primarily driven by oil-market specific shocks. Oil supply
+shocks have also a big impact but they tend to disappear after
+few periods, thus having a smaller overall impact on the dynamics
+of the real price of oil.
+The aggregate demand shock component has also a significant role, 
+but it seems to present an high level of persistence (look for example
+at the period between 1975 and 1985, where the effect of the aggregate
+demand shocks persist in driving the $rpo$ upward).
